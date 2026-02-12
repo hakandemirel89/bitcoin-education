@@ -1,3 +1,5 @@
+import warnings
+
 from btcedu.config import Settings
 
 
@@ -65,6 +67,7 @@ class TestSettings:
         settings = Settings(
             anthropic_api_key="test-key",
             openai_api_key="test-key",
+            podcast_youtube_channel_id="",
         )
         assert settings.rss_url == ""
 
@@ -85,3 +88,24 @@ class TestSettings:
         assert settings.claude_max_tokens == 8192
         assert settings.claude_temperature == 0.7
         assert settings.dry_run is True
+
+    def test_anthropic_api_key_loads(self):
+        settings = Settings(anthropic_api_key="sk-ant-test")
+        assert settings.anthropic_api_key == "sk-ant-test"
+        assert settings.claude_api_key == ""
+
+    def test_claude_api_key_alias_fallback(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            settings = Settings(anthropic_api_key="", claude_api_key="sk-ant-old")
+            assert settings.anthropic_api_key == "sk-ant-old"
+            assert settings.claude_api_key == ""  # cleared after migration
+            assert len(w) == 1
+            assert "deprecated" in str(w[0].message).lower()
+
+    def test_anthropic_takes_precedence_over_claude(self):
+        settings = Settings(
+            anthropic_api_key="sk-ant-new", claude_api_key="sk-ant-old"
+        )
+        assert settings.anthropic_api_key == "sk-ant-new"
+        assert settings.claude_api_key == ""  # cleared after migration

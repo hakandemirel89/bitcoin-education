@@ -1,4 +1,10 @@
+import logging
+import warnings
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -8,6 +14,27 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     whisper_api_key: str = ""  # falls back to openai_api_key if empty
+    claude_api_key: str = ""  # deprecated alias for anthropic_api_key
+
+    @model_validator(mode="after")
+    def _migrate_claude_api_key(self) -> "Settings":
+        """Support CLAUDE_API_KEY as a deprecated alias for ANTHROPIC_API_KEY."""
+        if self.claude_api_key:
+            if not self.anthropic_api_key:
+                self.anthropic_api_key = self.claude_api_key
+                warnings.warn(
+                    "CLAUDE_API_KEY is deprecated. "
+                    "Use ANTHROPIC_API_KEY instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            else:
+                logger.debug(
+                    "Both ANTHROPIC_API_KEY and CLAUDE_API_KEY set; "
+                    "using ANTHROPIC_API_KEY."
+                )
+            self.claude_api_key = ""  # clear after migration
+        return self
 
     # Database
     database_url: str = "sqlite:///data/btcedu.db"
