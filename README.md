@@ -1,0 +1,173 @@
+# btcedu - Bitcoin Education Automation
+
+Automated pipeline that transforms German Bitcoin podcast episodes into Turkish educational YouTube content packages.
+
+**Source:** "Der Bitcoin Podcast" by Florian Bruce Boye (YouTube + RSS)
+
+## Pipeline Stages
+
+```
+detect -> download -> transcribe -> chunk -> generate
+  RSS      yt-dlp     Whisper API   FTS5     Claude Sonnet
+```
+
+Each episode produces 6 Turkish content artifacts:
+- `outline.tr.md` - Episode outline with citations
+- `script.long.tr.md` - Full YouTube video script
+- `shorts.tr.json` - 6 short-form video scripts
+- `visuals.json` - Visual/slide descriptions
+- `qa.json` - Q&A pairs for community posts
+- `publishing_pack.json` - Titles, descriptions, tags, thumbnails
+
+## Quickstart
+
+```bash
+# 1. Clone and setup
+cd /home/pi/AI-Startup-Lab/bitcoin-education
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 2. Configure
+cp .env.example .env
+# Edit .env with your API keys:
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   OPENAI_API_KEY=sk-...
+#   PODCAST_YOUTUBE_CHANNEL_ID=UC...
+
+# 3. Initialize database
+btcedu init-db
+
+# 4. Run the pipeline
+btcedu run-latest
+```
+
+## CLI Commands
+
+### Automation (cron-ready)
+
+| Command | Description |
+|---------|-------------|
+| `btcedu run-latest` | Detect + process newest pending episode |
+| `btcedu run-pending --max N --since YYYY-MM-DD` | Process all pending episodes |
+| `btcedu retry --episode-id ID` | Retry failed episodes from last successful stage |
+
+### Manual operations
+
+| Command | Description |
+|---------|-------------|
+| `btcedu detect` | Check RSS feed for new episodes |
+| `btcedu download --episode-id ID` | Download audio |
+| `btcedu transcribe --episode-id ID` | Transcribe via Whisper |
+| `btcedu chunk --episode-id ID` | Chunk transcript + FTS5 index |
+| `btcedu generate --episode-id ID [--force] [--top-k 16]` | Generate content |
+| `btcedu run [--episode-id ID] [--force]` | Run full pipeline |
+
+### Monitoring
+
+| Command | Description |
+|---------|-------------|
+| `btcedu status` | Episode counts by status + last 10 episodes |
+| `btcedu cost [--episode-id ID]` | API usage costs breakdown |
+| `btcedu report --episode-id ID` | Show latest pipeline report |
+
+All automation commands exit with code 0 on success, 1 on any failure.
+
+## Configuration
+
+All settings are loaded from `.env` (see `.env.example`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | required | Claude API key |
+| `OPENAI_API_KEY` | required | OpenAI/Whisper API key |
+| `PODCAST_YOUTUBE_CHANNEL_ID` | required | YouTube channel for RSS |
+| `CLAUDE_MODEL` | `claude-sonnet-4-20250514` | Model for content generation |
+| `DRY_RUN` | `false` | Write prompts to disk without API calls |
+| `CHUNK_SIZE` | `1500` | Characters per chunk (~350 tokens) |
+| `CLAUDE_MAX_TOKENS` | `4096` | Max output tokens per artifact |
+
+## Production Deployment (systemd)
+
+```bash
+# Copy unit files
+sudo cp deploy/btcedu-detect.service /etc/systemd/system/
+sudo cp deploy/btcedu-detect.timer /etc/systemd/system/
+sudo cp deploy/btcedu-run.service /etc/systemd/system/
+sudo cp deploy/btcedu-run.timer /etc/systemd/system/
+
+# Enable and start timers
+sudo systemctl daemon-reload
+sudo systemctl enable --now btcedu-detect.timer
+sudo systemctl enable --now btcedu-run.timer
+
+# Check timer status
+systemctl list-timers btcedu-*
+
+# View logs
+journalctl -u btcedu-detect --since today
+journalctl -u btcedu-run --since today
+```
+
+Schedule: detect every 6h, run-pending daily at 02:00.
+
+## Cost
+
+~$0.38 per episode (6 Claude Sonnet calls with ~5k input / ~1.5k output tokens each).
+
+## Testing
+
+```bash
+source .venv/bin/activate
+python -m pytest tests/ -v
+```
+
+## System Requirements
+
+- Python 3.11+
+- ffmpeg (for audio splitting via pydub)
+- SQLite with FTS5 support (standard on most systems)
+
+## Project Structure
+
+```
+btcedu/
+  cli.py              # Click CLI commands
+  config.py           # Pydantic settings
+  db.py               # SQLAlchemy engine/session
+  core/
+    detector.py       # RSS detection + download
+    transcriber.py    # Whisper transcription + chunking
+    chunker.py        # Text chunking + FTS5
+    generator.py      # Claude content generation
+    pipeline.py       # Pipeline orchestration + retry
+  models/
+    episode.py        # Episode, PipelineRun, Chunk ORM
+    content_artifact.py # ContentArtifact ORM
+    schemas.py        # Pydantic schemas
+  services/
+    feed_service.py   # RSS feed parsing
+    download_service.py # yt-dlp wrapper
+    transcription_service.py # Whisper API wrapper
+    claude_service.py # Claude API wrapper
+  prompts/
+    system.py         # Shared Turkish system prompt
+    outline.py        # Outline prompt template
+    script.py         # Script prompt template
+    shorts.py         # Shorts prompt template
+    visuals.py        # Visuals prompt template
+    qa.py             # Q&A prompt template
+    publishing.py     # Publishing pack template
+deploy/
+  btcedu-detect.*     # systemd units for detection
+  btcedu-run.*        # systemd units for processing
+tests/
+data/
+  btcedu.db           # SQLite database
+  raw/                # Downloaded audio files
+  transcripts/        # Whisper transcripts
+  chunks/             # Chunk JSONL files
+  outputs/            # Generated content artifacts
+  reports/            # Pipeline run reports
+  chromadb/           # ChromaDB (optional)
+```

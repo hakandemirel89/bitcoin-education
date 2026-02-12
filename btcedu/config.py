@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     output_dir: str = "output"
     outputs_dir: str = "data/outputs"
 
+    # Reports & Logs
+    reports_dir: str = "data/reports"
+    logs_dir: str = "data/logs"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property

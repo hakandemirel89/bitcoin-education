@@ -61,6 +61,7 @@ class Episode(Base):
         DateTime(timezone=True), nullable=True
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     pipeline_runs: Mapped[list["PipelineRun"]] = relationship(
         back_populates="episode", cascade="all, delete-orphan"

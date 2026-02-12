@@ -1,0 +1,13 @@
+[Unit]
+Description=btcedu - Detect new podcast episodes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/AI-Startup-Lab/bitcoin-education
+ExecStart=/home/pi/AI-Startup-Lab/bitcoin-education/.venv/bin/btcedu detect
+EnvironmentFile=/home/pi/AI-Startup-Lab/bitcoin-education/.env
+StandardOutput=journal
+StandardError=journal

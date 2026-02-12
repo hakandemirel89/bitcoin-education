@@ -1,4 +1,7 @@
+import json
 import logging
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -114,19 +117,13 @@ def chunk(ctx: click.Context, episode_ids: tuple[str, ...], force: bool) -> None
 @cli.command()
 @click.option(
     "--episode-id", "episode_ids", multiple=True,
-    help="Episode ID(s) to process (repeatable). If omitted, processes all NEW episodes.",
+    help="Episode ID(s) to process (repeatable). If omitted, processes all pending episodes.",
 )
-@click.option(
-    "--stage",
-    type=click.Choice([s.value for s in PipelineStage]),
-    default=None,
-    help="Run only this stage.",
-)
+@click.option("--force", is_flag=True, default=False, help="Force re-run of completed stages.")
 @click.pass_context
-def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> None:
-    """Run the content generation pipeline."""
-    from btcedu.core.detector import download_episode
-    from btcedu.core.transcriber import chunk_episode, transcribe_episode
+def run(ctx: click.Context, episode_ids: tuple[str, ...], force: bool) -> None:
+    """Run the full pipeline for specific or all pending episodes."""
+    from btcedu.core.pipeline import run_episode_pipeline, write_report
 
     settings = ctx.obj["settings"]
     session = ctx.obj["session_factory"]()
@@ -148,6 +145,7 @@ def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> 
                         EpisodeStatus.CHUNKED,
                     ])
                 )
+                .order_by(Episode.published_at.asc())
                 .all()
             )
 
@@ -155,56 +153,182 @@ def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> 
             click.echo("No episodes to process.")
             return
 
+        has_failure = False
         for ep in episodes:
             click.echo(f"Processing: {ep.episode_id} ({ep.title})")
+            report = run_episode_pipeline(session, ep, settings, force=force)
+            write_report(report, settings.reports_dir)
 
-            # Download if needed
-            if ep.status == EpisodeStatus.NEW and (stage is None or stage == "download"):
-                try:
-                    path = download_episode(session, ep.episode_id, settings)
-                    click.echo(f"  Downloaded -> {path}")
-                except Exception as e:
-                    click.echo(f"  Download failed: {e}", err=True)
-                    continue
+            for sr in report.stages:
+                if sr.status == "success":
+                    click.echo(f"  {sr.stage}: {sr.detail} ({sr.duration_seconds:.1f}s)")
+                elif sr.status == "failed":
+                    click.echo(f"  {sr.stage}: FAILED - {sr.error}", err=True)
 
-            # Transcribe if needed
-            if ep.status == EpisodeStatus.DOWNLOADED and (
-                stage is None or stage == "transcribe"
-            ):
-                try:
-                    path = transcribe_episode(session, ep.episode_id, settings)
-                    click.echo(f"  Transcribed -> {path}")
-                except Exception as e:
-                    click.echo(f"  Transcribe failed: {e}", err=True)
-                    continue
+            if report.success:
+                click.echo(f"  -> OK (${report.total_cost_usd:.4f})")
+            else:
+                click.echo(f"  -> FAILED: {report.error}", err=True)
+                has_failure = True
 
-            # Chunk if needed
-            if ep.status == EpisodeStatus.TRANSCRIBED and (
-                stage is None or stage == "chunk"
-            ):
-                try:
-                    count = chunk_episode(session, ep.episode_id, settings)
-                    click.echo(f"  Chunked -> {count} chunks")
-                except Exception as e:
-                    click.echo(f"  Chunk failed: {e}", err=True)
-                    continue
-
-            # Generate if needed
-            if ep.status == EpisodeStatus.CHUNKED and (
-                stage is None or stage == "generate"
-            ):
-                try:
-                    from btcedu.core.generator import generate_content
-
-                    gen = generate_content(session, ep.episode_id, settings)
-                    click.echo(
-                        f"  Generated -> {len(gen.artifacts)} artifacts (${gen.total_cost_usd:.4f})"
-                    )
-                except Exception as e:
-                    click.echo(f"  Generate failed: {e}", err=True)
-                    continue
+        if has_failure:
+            sys.exit(1)
     finally:
         session.close()
+
+
+@cli.command(name="run-latest")
+@click.pass_context
+def run_latest_cmd(ctx: click.Context) -> None:
+    """Detect new episodes, then process the newest pending one."""
+    from btcedu.core.pipeline import run_latest, write_report
+
+    settings = ctx.obj["settings"]
+    session = ctx.obj["session_factory"]()
+    try:
+        report = run_latest(session, settings)
+
+        if report is None:
+            click.echo("No pending episodes to process.")
+            return
+
+        write_report(report, settings.reports_dir)
+
+        click.echo(f"Episode: {report.episode_id} ({report.title})")
+        for sr in report.stages:
+            if sr.status == "success":
+                click.echo(f"  {sr.stage}: {sr.detail} ({sr.duration_seconds:.1f}s)")
+            elif sr.status == "failed":
+                click.echo(f"  {sr.stage}: FAILED - {sr.error}", err=True)
+
+        if report.success:
+            click.echo(f"-> OK (${report.total_cost_usd:.4f})")
+        else:
+            click.echo(f"-> FAILED: {report.error}", err=True)
+            sys.exit(1)
+    finally:
+        session.close()
+
+
+@cli.command(name="run-pending")
+@click.option("--max", "max_episodes", type=int, default=None, help="Max episodes to process.")
+@click.option("--since", type=click.DateTime(), default=None, help="Only episodes published after this date (YYYY-MM-DD).")
+@click.pass_context
+def run_pending_cmd(ctx: click.Context, max_episodes: int | None, since: datetime | None) -> None:
+    """Process all pending episodes through the pipeline."""
+    from btcedu.core.pipeline import run_pending, write_report
+
+    settings = ctx.obj["settings"]
+    session = ctx.obj["session_factory"]()
+    try:
+        # Add timezone info if since was provided
+        if since is not None and since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+
+        reports = run_pending(session, settings, max_episodes=max_episodes, since=since)
+
+        if not reports:
+            click.echo("No pending episodes to process.")
+            return
+
+        has_failure = False
+        for report in reports:
+            write_report(report, settings.reports_dir)
+            status_str = "OK" if report.success else "FAILED"
+            click.echo(
+                f"  [{status_str}] {report.episode_id}: {report.title[:50]} "
+                f"(${report.total_cost_usd:.4f})"
+            )
+            if not report.success:
+                has_failure = True
+
+        ok = sum(1 for r in reports if r.success)
+        fail = len(reports) - ok
+        total_cost = sum(r.total_cost_usd for r in reports)
+        click.echo(f"\nDone: {ok} ok, {fail} failed, ${total_cost:.4f} total cost")
+
+        if has_failure:
+            sys.exit(1)
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option(
+    "--episode-id", "episode_ids", multiple=True, required=True,
+    help="Episode ID(s) to retry (repeatable).",
+)
+@click.pass_context
+def retry(ctx: click.Context, episode_ids: tuple[str, ...]) -> None:
+    """Retry failed episodes from their last successful stage."""
+    from btcedu.core.pipeline import retry_episode, write_report
+
+    settings = ctx.obj["settings"]
+    session = ctx.obj["session_factory"]()
+    try:
+        has_failure = False
+        for eid in episode_ids:
+            try:
+                report = retry_episode(session, eid, settings)
+                write_report(report, settings.reports_dir)
+
+                if report.success:
+                    click.echo(f"[OK] {eid}: retry succeeded (${report.total_cost_usd:.4f})")
+                else:
+                    click.echo(f"[FAIL] {eid}: {report.error}", err=True)
+                    has_failure = True
+            except ValueError as e:
+                click.echo(f"[FAIL] {eid}: {e}", err=True)
+                has_failure = True
+
+        if has_failure:
+            sys.exit(1)
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option("--episode-id", "episode_id", type=str, required=True, help="Episode to show report for.")
+@click.pass_context
+def report(ctx: click.Context, episode_id: str) -> None:
+    """Show the latest pipeline report for an episode."""
+    settings = ctx.obj["settings"]
+    report_dir = Path(settings.reports_dir) / episode_id
+
+    if not report_dir.exists():
+        click.echo(f"No reports found for {episode_id}")
+        return
+
+    reports = sorted(report_dir.glob("report_*.json"), reverse=True)
+    if not reports:
+        click.echo(f"No reports found for {episode_id}")
+        return
+
+    latest = reports[0]
+    data = json.loads(latest.read_text())
+
+    click.echo(f"=== Report: {episode_id} ===")
+    click.echo(f"  Title:     {data['title']}")
+    click.echo(f"  Status:    {'OK' if data['success'] else 'FAILED'}")
+    click.echo(f"  Started:   {data['started_at']}")
+    click.echo(f"  Completed: {data['completed_at']}")
+    click.echo(f"  Cost:      ${data['total_cost_usd']:.4f}")
+
+    if data.get("error"):
+        click.echo(f"  Error:     {data['error']}")
+
+    click.echo("  Stages:")
+    for stage in data.get("stages", []):
+        status_str = stage["status"].upper()
+        detail = stage.get("detail", "")
+        error = stage.get("error", "")
+        duration = stage.get("duration_seconds", 0)
+        line = f"    {stage['stage']:<12} {status_str:<8} {duration:.1f}s"
+        if detail:
+            line += f"  {detail}"
+        if error:
+            line += f"  ERROR: {error}"
+        click.echo(line)
 
 
 @cli.command()
@@ -237,8 +361,12 @@ def status(ctx: click.Context) -> None:
             click.echo("  (none)")
         for ep in recent:
             pub = ep.published_at.strftime("%Y-%m-%d") if ep.published_at else "???"
+            err = ""
+            if ep.error_message:
+                err = f"  !! {ep.error_message[:40]}"
             click.echo(
-                f"  [{ep.status.value:<12}] {ep.episode_id}  {pub}  {ep.title[:60]}"
+                f"  [{ep.status.value:<12}] {ep.episode_id}  {pub}  "
+                f"{ep.title[:50]}{err}"
             )
     finally:
         session.close()
@@ -317,24 +445,14 @@ def cost(ctx: click.Context, episode_id: str | None) -> None:
                 f"${cost_val:.4f}"
             )
         click.echo(f"  {'TOTAL':<12} ${grand_total:.4f}")
+
+        # Episode count and per-episode average
+        ep_count = session.query(func.count(func.distinct(PipelineRun.episode_id))).scalar()
+        if ep_count and ep_count > 0:
+            click.echo(f"\n  Episodes processed: {ep_count}")
+            click.echo(f"  Avg cost/episode:   ${grand_total / ep_count:.4f}")
     finally:
         session.close()
-
-
-@cli.command()
-@click.option("--episode-id", type=str, required=True, help="Episode to reprocess")
-@click.option(
-    "--from",
-    "from_stage",
-    type=click.Choice([s.value for s in PipelineStage]),
-    default="detect",
-    help="Reprocess from this stage",
-)
-@click.pass_context
-def reprocess(ctx: click.Context, episode_id: str, from_stage: str) -> None:
-    """Reprocess an episode from a specific stage."""
-    click.echo(f"Reprocessing episode {episode_id} from stage '{from_stage}'...")
-    click.echo("(Not yet implemented)")
 
 
 @cli.command(name="init-db")
