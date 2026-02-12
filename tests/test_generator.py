@@ -58,21 +58,35 @@ def _make_settings(tmp_path: Path) -> Settings:
 class TestBuildQueryTerms:
     def test_extracts_content_words(self):
         terms = build_query_terms("Bitcoin und die Zukunft des Geldes")
-        assert "Bitcoin" in terms
-        assert "Zukunft" in terms
-        assert "Geldes" in terms
+        assert '"Bitcoin"' in terms
+        assert '"Zukunft"' in terms
+        assert '"Geldes"' in terms
 
     def test_filters_stopwords(self):
         terms = build_query_terms("Bitcoin und die Zukunft des Geldes")
-        assert "und" not in terms
-        assert "die" not in terms
-        assert "des" not in terms
+        # Stopwords should not appear (neither quoted nor unquoted)
+        joined = " ".join(terms)
+        assert "und" not in joined.replace('"', '').split()
+        assert "die" not in joined.replace('"', '').split()
+        assert "des" not in joined.replace('"', '').split()
 
     def test_keeps_bitcoin_terms(self):
         terms = build_query_terms("Blockchain und Lightning Network")
-        assert "Blockchain" in terms
-        assert "Lightning" in terms
-        assert "Network" in terms
+        assert '"Blockchain"' in terms
+        assert '"Lightning"' in terms
+        assert '"Network"' in terms
+
+    def test_splits_hyphenated_words(self):
+        terms = build_query_terms("Das Saylor-Kalkül: Was hat Strategy vor?")
+        assert '"Saylor"' in terms
+        assert '"Kalkül"' in terms
+        assert '"Strategy"' in terms
+
+    def test_strips_brackets(self):
+        terms = build_query_terms("Bitcoin Prognosen [2026]")
+        assert '"Bitcoin"' in terms
+        assert '"Prognosen"' in terms
+        assert '"2026"' in terms
 
 
 # ── Chunk Retrieval ───────────────────────────────────────────────

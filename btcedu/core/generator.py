@@ -72,14 +72,23 @@ def build_query_terms(title: str) -> list[str]:
 
     Returns:
         List of content words suitable for FTS5 OR query.
+        Each term is double-quoted to prevent FTS5 from interpreting
+        hyphens, brackets, or other characters as operators.
     """
+    import re
+
     words = []
     for word in title.split():
-        # Strip punctuation
-        clean = word.strip(".,;:!?\"'()-/")
-        if clean and clean.lower() not in DE_STOPWORDS and len(clean) > 2:
-            words.append(clean)
-    return words if words else [title.split()[0]] if title.strip() else ["Bitcoin"]
+        # Strip punctuation and brackets
+        clean = word.strip(".,;:!?\"'()-/[]")
+        # Split on internal hyphens (e.g. "Saylor-Kalkül" → ["Saylor", "Kalkül"])
+        parts = re.split(r"[-/]", clean) if clean else []
+        for part in parts:
+            part = part.strip()
+            if part and part.lower() not in DE_STOPWORDS and len(part) > 2:
+                # Double-quote for FTS5 literal matching (safe from operator parsing)
+                words.append(f'"{part}"')
+    return words if words else [f'"{title.split()[0]}"'] if title.strip() else ['"Bitcoin"']
 
 
 def retrieve_chunks(
