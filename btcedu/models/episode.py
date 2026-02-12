@@ -102,3 +102,19 @@ class PipelineRun(Base):
             f"<PipelineRun(id={self.id}, stage='{self.stage.value}', "
             f"status='{self.status.value}')>"
         )
+
+
+class Chunk(Base):
+    __tablename__ = "chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chunk_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    episode_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    token_estimate: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<Chunk(chunk_id='{self.chunk_id}', ordinal={self.ordinal})>"

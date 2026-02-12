@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import click
 
@@ -64,6 +65,54 @@ def download(ctx: click.Context, episode_ids: tuple[str, ...], force: bool) -> N
 
 @cli.command()
 @click.option(
+    "--episode-id", "episode_ids", multiple=True, required=True,
+    help="Episode ID(s) to transcribe (repeatable).",
+)
+@click.option("--force", is_flag=True, default=False, help="Re-transcribe even if file exists.")
+@click.pass_context
+def transcribe(ctx: click.Context, episode_ids: tuple[str, ...], force: bool) -> None:
+    """Transcribe audio for specified episodes via Whisper API."""
+    from btcedu.core.transcriber import transcribe_episode
+
+    settings = ctx.obj["settings"]
+    session = ctx.obj["session_factory"]()
+    try:
+        for eid in episode_ids:
+            try:
+                path = transcribe_episode(session, eid, settings, force=force)
+                click.echo(f"[OK] {eid} -> {path}")
+            except Exception as e:
+                click.echo(f"[FAIL] {eid}: {e}", err=True)
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option(
+    "--episode-id", "episode_ids", multiple=True, required=True,
+    help="Episode ID(s) to chunk (repeatable).",
+)
+@click.option("--force", is_flag=True, default=False, help="Re-chunk even if file exists.")
+@click.pass_context
+def chunk(ctx: click.Context, episode_ids: tuple[str, ...], force: bool) -> None:
+    """Chunk transcripts for specified episodes."""
+    from btcedu.core.transcriber import chunk_episode
+
+    settings = ctx.obj["settings"]
+    session = ctx.obj["session_factory"]()
+    try:
+        for eid in episode_ids:
+            try:
+                count = chunk_episode(session, eid, settings, force=force)
+                click.echo(f"[OK] {eid} -> {count} chunks")
+            except Exception as e:
+                click.echo(f"[FAIL] {eid}: {e}", err=True)
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option(
     "--episode-id", "episode_ids", multiple=True,
     help="Episode ID(s) to process (repeatable). If omitted, processes all NEW episodes.",
 )
@@ -77,11 +126,11 @@ def download(ctx: click.Context, episode_ids: tuple[str, ...], force: bool) -> N
 def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> None:
     """Run the content generation pipeline."""
     from btcedu.core.detector import download_episode
+    from btcedu.core.transcriber import chunk_episode, transcribe_episode
 
     settings = ctx.obj["settings"]
     session = ctx.obj["session_factory"]()
     try:
-        # Resolve which episodes to process
         if episode_ids:
             episodes = (
                 session.query(Episode)
@@ -91,7 +140,13 @@ def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> 
         else:
             episodes = (
                 session.query(Episode)
-                .filter(Episode.status == EpisodeStatus.NEW)
+                .filter(
+                    Episode.status.in_([
+                        EpisodeStatus.NEW,
+                        EpisodeStatus.DOWNLOADED,
+                        EpisodeStatus.TRANSCRIBED,
+                    ])
+                )
                 .all()
             )
 
@@ -111,8 +166,30 @@ def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> 
                     click.echo(f"  Download failed: {e}", err=True)
                     continue
 
-            # Future stages (transcribe, chunk, generate) will be added here
-            if stage and stage != "download":
+            # Transcribe if needed
+            if ep.status == EpisodeStatus.DOWNLOADED and (
+                stage is None or stage == "transcribe"
+            ):
+                try:
+                    path = transcribe_episode(session, ep.episode_id, settings)
+                    click.echo(f"  Transcribed -> {path}")
+                except Exception as e:
+                    click.echo(f"  Transcribe failed: {e}", err=True)
+                    continue
+
+            # Chunk if needed
+            if ep.status == EpisodeStatus.TRANSCRIBED and (
+                stage is None or stage == "chunk"
+            ):
+                try:
+                    count = chunk_episode(session, ep.episode_id, settings)
+                    click.echo(f"  Chunked -> {count} chunks")
+                except Exception as e:
+                    click.echo(f"  Chunk failed: {e}", err=True)
+                    continue
+
+            # Future stages (generate) will be added here
+            if stage and stage not in ("download", "transcribe", "chunk"):
                 click.echo(f"  Stage '{stage}' not yet implemented.")
     finally:
         session.close()
@@ -136,7 +213,6 @@ def status(ctx: click.Context) -> None:
         for s, c in rows:
             click.echo(f"  {s.value:<14} {c}")
 
-        # Last 10 episodes
         click.echo("")
         click.echo("--- Last 10 episodes ---")
         recent = (
@@ -149,7 +225,9 @@ def status(ctx: click.Context) -> None:
             click.echo("  (none)")
         for ep in recent:
             pub = ep.published_at.strftime("%Y-%m-%d") if ep.published_at else "???"
-            click.echo(f"  [{ep.status.value:<12}] {ep.episode_id}  {pub}  {ep.title[:60]}")
+            click.echo(
+                f"  [{ep.status.value:<12}] {ep.episode_id}  {pub}  {ep.title[:60]}"
+            )
     finally:
         session.close()
 

@@ -18,6 +18,10 @@ class TestSettings:
         assert settings.whisper_language == "de"
         assert settings.output_dir == "output"
         assert settings.raw_data_dir == "data/raw"
+        assert settings.transcripts_dir == "data/transcripts"
+        assert settings.chunks_dir == "data/chunks"
+        assert settings.chunk_size == 1500
+        assert settings.chunk_overlap == 0.15
 
     def test_source_type_default(self):
         settings = Settings()
@@ -26,6 +30,18 @@ class TestSettings:
     def test_source_type_override(self):
         settings = Settings(source_type="rss")
         assert settings.source_type == "rss"
+
+    def test_use_chroma_default_false(self):
+        settings = Settings()
+        assert settings.use_chroma is False
+
+    def test_effective_whisper_api_key_prefers_whisper(self):
+        settings = Settings(whisper_api_key="whisper-key", openai_api_key="openai-key")
+        assert settings.effective_whisper_api_key == "whisper-key"
+
+    def test_effective_whisper_api_key_falls_back_to_openai(self):
+        settings = Settings(whisper_api_key="", openai_api_key="openai-key")
+        assert settings.effective_whisper_api_key == "openai-key"
 
     def test_rss_url_from_channel_id(self):
         settings = Settings(
@@ -51,3 +67,8 @@ class TestSettings:
             openai_api_key="test-key",
         )
         assert settings.rss_url == ""
+
+    def test_chunk_config_override(self):
+        settings = Settings(chunk_size=800, chunk_overlap=0.20)
+        assert settings.chunk_size == 800
+        assert settings.chunk_overlap == 0.20
