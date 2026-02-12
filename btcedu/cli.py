@@ -145,6 +145,7 @@ def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> 
                         EpisodeStatus.NEW,
                         EpisodeStatus.DOWNLOADED,
                         EpisodeStatus.TRANSCRIBED,
+                        EpisodeStatus.CHUNKED,
                     ])
                 )
                 .all()
@@ -188,9 +189,20 @@ def run(ctx: click.Context, episode_ids: tuple[str, ...], stage: str | None) -> 
                     click.echo(f"  Chunk failed: {e}", err=True)
                     continue
 
-            # Future stages (generate) will be added here
-            if stage and stage not in ("download", "transcribe", "chunk"):
-                click.echo(f"  Stage '{stage}' not yet implemented.")
+            # Generate if needed
+            if ep.status == EpisodeStatus.CHUNKED and (
+                stage is None or stage == "generate"
+            ):
+                try:
+                    from btcedu.core.generator import generate_content
+
+                    gen = generate_content(session, ep.episode_id, settings)
+                    click.echo(
+                        f"  Generated -> {len(gen.artifacts)} artifacts (${gen.total_cost_usd:.4f})"
+                    )
+                except Exception as e:
+                    click.echo(f"  Generate failed: {e}", err=True)
+                    continue
     finally:
         session.close()
 
@@ -233,11 +245,80 @@ def status(ctx: click.Context) -> None:
 
 
 @cli.command()
-@click.option("--episode-id", type=int, default=None, help="Show cost for specific episode")
+@click.option(
+    "--episode-id", "episode_ids", multiple=True, required=True,
+    help="Episode ID(s) to generate content for (repeatable).",
+)
+@click.option("--force", is_flag=True, default=False, help="Regenerate even if outputs exist.")
+@click.option("--top-k", type=int, default=16, help="Number of chunks to retrieve for context.")
 @click.pass_context
-def cost(ctx: click.Context, episode_id: int | None) -> None:
-    """Show API usage costs."""
-    click.echo("(Not yet implemented — available after Phase 4)")
+def generate(ctx: click.Context, episode_ids: tuple[str, ...], force: bool, top_k: int) -> None:
+    """Generate Turkish content package for CHUNKED episodes."""
+    from btcedu.core.generator import generate_content
+
+    settings = ctx.obj["settings"]
+    session = ctx.obj["session_factory"]()
+    try:
+        for eid in episode_ids:
+            try:
+                result = generate_content(session, eid, settings, force=force, top_k=top_k)
+                click.echo(
+                    f"[OK] {eid} -> {len(result.artifacts)} artifacts "
+                    f"(${result.total_cost_usd:.4f})"
+                )
+            except Exception as e:
+                click.echo(f"[FAIL] {eid}: {e}", err=True)
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option("--episode-id", "episode_id", type=str, default=None, help="Filter by episode ID")
+@click.pass_context
+def cost(ctx: click.Context, episode_id: str | None) -> None:
+    """Show API usage costs from PipelineRun records."""
+    from sqlalchemy import func
+
+    from btcedu.models.episode import PipelineRun
+
+    session = ctx.obj["session_factory"]()
+    try:
+        query = session.query(
+            PipelineRun.stage,
+            func.count().label("runs"),
+            func.sum(PipelineRun.input_tokens).label("input_tokens"),
+            func.sum(PipelineRun.output_tokens).label("output_tokens"),
+            func.sum(PipelineRun.estimated_cost_usd).label("total_cost"),
+        )
+
+        if episode_id:
+            ep = session.query(Episode).filter(Episode.episode_id == episode_id).first()
+            if not ep:
+                click.echo(f"Episode not found: {episode_id}")
+                return
+            query = query.filter(PipelineRun.episode_id == ep.id)
+
+        rows = query.group_by(PipelineRun.stage).all()
+
+        if not rows:
+            click.echo("No pipeline runs recorded yet.")
+            return
+
+        click.echo("=== API Usage Costs ===")
+        grand_total = 0.0
+        for row in rows:
+            cost_val = row.total_cost or 0.0
+            grand_total += cost_val
+            click.echo(
+                f"  {row.stage.value:<12} "
+                f"runs={row.runs}  "
+                f"in={row.input_tokens or 0:>8}  "
+                f"out={row.output_tokens or 0:>8}  "
+                f"${cost_val:.4f}"
+            )
+        click.echo(f"  {'TOTAL':<12} ${grand_total:.4f}")
+    finally:
+        session.close()
 
 
 @cli.command()

@@ -72,3 +72,16 @@ class TestSettings:
         settings = Settings(chunk_size=800, chunk_overlap=0.20)
         assert settings.chunk_size == 800
         assert settings.chunk_overlap == 0.20
+
+    def test_claude_generation_defaults(self):
+        settings = Settings()
+        assert settings.claude_max_tokens == 4096
+        assert settings.claude_temperature == 0.3
+        assert settings.dry_run is False
+        assert settings.outputs_dir == "data/outputs"
+
+    def test_claude_generation_override(self):
+        settings = Settings(claude_max_tokens=8192, claude_temperature=0.7, dry_run=True)
+        assert settings.claude_max_tokens == 8192
+        assert settings.claude_temperature == 0.7
+        assert settings.dry_run is True

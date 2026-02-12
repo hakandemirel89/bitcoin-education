@@ -38,10 +38,14 @@ class Settings(BaseSettings):
 
     # Content Generation
     claude_model: str = "claude-sonnet-4-20250514"
+    claude_max_tokens: int = 4096
+    claude_temperature: float = 0.3
     max_retries: int = 3
+    dry_run: bool = False
 
     # Output
     output_dir: str = "output"
+    outputs_dir: str = "data/outputs"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
