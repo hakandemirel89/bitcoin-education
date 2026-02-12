@@ -20,29 +20,31 @@ from btcedu.models.schemas import (
 class TestEpisodeORM:
     def test_create_episode(self, db_session):
         episode = Episode(
-            video_id="abc123",
+            episode_id="abc123",
+            source="youtube_rss",
             title="Test Episode",
             url="https://youtube.com/watch?v=abc123",
-            status=EpisodeStatus.DETECTED,
+            status=EpisodeStatus.NEW,
         )
         db_session.add(episode)
         db_session.commit()
 
         result = db_session.query(Episode).first()
         assert result is not None
-        assert result.video_id == "abc123"
+        assert result.episode_id == "abc123"
         assert result.title == "Test Episode"
-        assert result.status == EpisodeStatus.DETECTED
+        assert result.status == EpisodeStatus.NEW
+        assert result.source == "youtube_rss"
         assert result.detected_at is not None
 
-    def test_episode_unique_video_id(self, db_session):
+    def test_episode_unique_episode_id(self, db_session):
         ep1 = Episode(
-            video_id="abc123",
+            episode_id="abc123",
             title="Episode 1",
             url="https://youtube.com/watch?v=abc123",
         )
         ep2 = Episode(
-            video_id="abc123",
+            episode_id="abc123",
             title="Episode 2",
             url="https://youtube.com/watch?v=abc123",
         )
@@ -57,10 +59,10 @@ class TestEpisodeORM:
 
     def test_episode_status_transitions(self, db_session):
         episode = Episode(
-            video_id="abc123",
+            episode_id="abc123",
             title="Test",
             url="https://youtube.com/watch?v=abc123",
-            status=EpisodeStatus.DETECTED,
+            status=EpisodeStatus.NEW,
         )
         db_session.add(episode)
         db_session.commit()
@@ -71,7 +73,7 @@ class TestEpisodeORM:
 
     def test_pipeline_run_relationship(self, db_session):
         episode = Episode(
-            video_id="abc123",
+            episode_id="abc123",
             title="Test",
             url="https://youtube.com/watch?v=abc123",
         )
@@ -91,7 +93,7 @@ class TestEpisodeORM:
 
     def test_pipeline_run_defaults(self, db_session):
         episode = Episode(
-            video_id="abc123",
+            episode_id="abc123",
             title="Test",
             url="https://youtube.com/watch?v=abc123",
         )
@@ -115,13 +117,13 @@ class TestEpisodeORM:
 class TestPydanticSchemas:
     def test_episode_info(self):
         info = EpisodeInfo(
-            video_id="abc123",
+            episode_id="abc123",
             title="Test Episode",
             url="https://youtube.com/watch?v=abc123",
-            duration_seconds=3600,
+            source="youtube_rss",
         )
-        assert info.video_id == "abc123"
-        assert info.duration_seconds == 3600
+        assert info.episode_id == "abc123"
+        assert info.source == "youtube_rss"
 
     def test_transcript_chunk(self):
         chunk = TranscriptChunk(
@@ -164,7 +166,7 @@ class TestPydanticSchemas:
             episode_id=1,
             video_id="abc123",
             title="Test",
-            status="detected",
+            status="new",
             detected_at=now,
         )
         assert status.total_cost_usd == 0.0

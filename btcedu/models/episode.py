@@ -8,7 +8,7 @@ from btcedu.db import Base
 
 
 class EpisodeStatus(str, enum.Enum):
-    DETECTED = "detected"
+    NEW = "new"
     DOWNLOADED = "downloaded"
     TRANSCRIBED = "transcribed"
     CHUNKED = "chunked"
@@ -40,13 +40,16 @@ class Episode(Base):
     __tablename__ = "episodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    video_id: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    episode_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="youtube_rss")
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[EpisodeStatus] = mapped_column(
-        Enum(EpisodeStatus), nullable=False, default=EpisodeStatus.DETECTED
+        Enum(EpisodeStatus), nullable=False, default=EpisodeStatus.NEW
     )
     audio_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     transcript_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -54,7 +57,9 @@ class Episode(Base):
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     pipeline_runs: Mapped[list["PipelineRun"]] = relationship(
@@ -62,14 +67,19 @@ class Episode(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Episode(id={self.id}, video_id='{self.video_id}', status='{self.status.value}')>"
+        return (
+            f"<Episode(id={self.id}, episode_id='{self.episode_id}', "
+            f"status='{self.status.value}')>"
+        )
 
 
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    episode_id: Mapped[int] = mapped_column(Integer, ForeignKey("episodes.id"), nullable=False)
+    episode_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("episodes.id"), nullable=False
+    )
     stage: Mapped[PipelineStage] = mapped_column(Enum(PipelineStage), nullable=False)
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus), nullable=False, default=RunStatus.RUNNING
@@ -77,7 +87,9 @@ class PipelineRun(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

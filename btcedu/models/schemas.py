@@ -6,11 +6,11 @@ from pydantic import BaseModel, Field
 class EpisodeInfo(BaseModel):
     """Parsed episode info from RSS/YouTube feed."""
 
-    video_id: str
+    episode_id: str
     title: str
     published_at: datetime | None = None
     url: str
-    duration_seconds: int | None = None
+    source: str = "youtube_rss"
 
 
 class TranscriptChunk(BaseModel):

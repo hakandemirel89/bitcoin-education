@@ -1,5 +1,3 @@
-import os
-
 from btcedu.config import Settings
 
 
@@ -19,6 +17,15 @@ class TestSettings:
         assert settings.whisper_model == "whisper-1"
         assert settings.whisper_language == "de"
         assert settings.output_dir == "output"
+        assert settings.raw_data_dir == "data/raw"
+
+    def test_source_type_default(self):
+        settings = Settings()
+        assert settings.source_type == "youtube_rss"
+
+    def test_source_type_override(self):
+        settings = Settings(source_type="rss")
+        assert settings.source_type == "rss"
 
     def test_rss_url_from_channel_id(self):
         settings = Settings(

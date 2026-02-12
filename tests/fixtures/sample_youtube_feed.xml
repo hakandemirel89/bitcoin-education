@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <link rel="self" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCtest123"/>
+  <id>yt:channel:UCtest123</id>
+  <yt:channelId>UCtest123</yt:channelId>
+  <title>Der Bitcoin Podcast</title>
+  <link rel="alternate" href="https://www.youtube.com/channel/UCtest123"/>
+  <author>
+    <name>Der Bitcoin Podcast</name>
+    <uri>https://www.youtube.com/channel/UCtest123</uri>
+  </author>
+  <published>2024-01-01T00:00:00+00:00</published>
+
+  <entry>
+    <id>yt:video:dQw4w9WgXcQ</id>
+    <yt:videoId>dQw4w9WgXcQ</yt:videoId>
+    <title>Bitcoin und die Zukunft des Geldes - Episode 42</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"/>
+    <author>
+      <name>Der Bitcoin Podcast</name>
+    </author>
+    <published>2024-06-15T10:00:00+00:00</published>
+    <updated>2024-06-15T12:00:00+00:00</updated>
+    <media:group>
+      <media:title>Bitcoin und die Zukunft des Geldes - Episode 42</media:title>
+      <media:description>In dieser Episode sprechen wir ueber Bitcoin.</media:description>
+      <media:thumbnail url="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"/>
+    </media:group>
+  </entry>
+
+  <entry>
+    <id>yt:video:xYz789AbCdE</id>
+    <yt:videoId>xYz789AbCdE</yt:videoId>
+    <title>Lightning Network erklaert - Episode 41</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=xYz789AbCdE"/>
+    <author>
+      <name>Der Bitcoin Podcast</name>
+    </author>
+    <published>2024-06-08T10:00:00+00:00</published>
+    <updated>2024-06-08T12:00:00+00:00</updated>
+    <media:group>
+      <media:title>Lightning Network erklaert - Episode 41</media:title>
+      <media:description>Lightning Network im Detail.</media:description>
+      <media:thumbnail url="https://i.ytimg.com/vi/xYz789AbCdE/hqdefault.jpg"/>
+    </media:group>
+  </entry>
+
+  <entry>
+    <id>yt:video:aBcDeFgHiJk</id>
+    <yt:videoId>aBcDeFgHiJk</yt:videoId>
+    <title>Bitcoin Mining und Energie - Episode 40</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=aBcDeFgHiJk"/>
+    <author>
+      <name>Der Bitcoin Podcast</name>
+    </author>
+    <published>2024-06-01T10:00:00+00:00</published>
+    <updated>2024-06-01T12:00:00+00:00</updated>
+    <media:group>
+      <media:title>Bitcoin Mining und Energie - Episode 40</media:title>
+      <media:description>Wie viel Energie braucht Bitcoin?</media:description>
+      <media:thumbnail url="https://i.ytimg.com/vi/aBcDeFgHiJk/hqdefault.jpg"/>
+    </media:group>
+  </entry>
+</feed>

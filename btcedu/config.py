@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from pydantic_settings import BaseSettings
 
 
@@ -17,11 +15,12 @@ class Settings(BaseSettings):
     chromadb_persist_dir: str = "data/chromadb"
 
     # Podcast Source
+    source_type: str = "youtube_rss"  # "youtube_rss" or "rss"
     podcast_youtube_channel_id: str = ""
     podcast_rss_url: str = ""
 
-    # Audio
-    audio_download_dir: str = "data/audio"
+    # Audio / Raw Data
+    raw_data_dir: str = "data/raw"
     audio_format: str = "m4a"
     max_audio_chunk_mb: int = 24
 
