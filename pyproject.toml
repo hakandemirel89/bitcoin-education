@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=75.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bitcoin-education"
+version = "0.1.0"
+description = "Automated pipeline: German Bitcoin podcast → Turkish educational content"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "anthropic>=0.40.0",
+    "openai>=1.0.0",
+    "chromadb>=0.5.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "feedparser>=6.0.0",
+    "yt-dlp>=2024.0.0",
+    "pydub>=0.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+btcedu = "btcedu.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["btcedu*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
