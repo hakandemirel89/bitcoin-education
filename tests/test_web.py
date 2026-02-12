@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from btcedu.config import Settings
 from btcedu.db import Base
@@ -33,8 +34,12 @@ def test_settings(tmp_path):
 
 @pytest.fixture
 def test_db():
-    """In-memory SQLite engine + session factory."""
-    engine = create_engine("sqlite:///:memory:")
+    """In-memory SQLite engine + session factory (shared across threads)."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     with engine.connect() as conn:
         conn.execute(text(
@@ -377,6 +382,18 @@ class TestJobsAndLogs:
         r = client.get("/api/episodes/ep001/action-log?tail=5")
         assert r.status_code == 200
         assert len(r.get_json()["lines"]) == 5
+
+    def test_run_all_nothing_to_do_on_generated(self, client, app):
+        """Run All on a GENERATED episode completes with 'Nothing to do'."""
+        r = client.post("/api/episodes/ep001/run", json={})
+        assert r.status_code == 202
+        job_id = r.get_json()["job_id"]
+        time.sleep(0.5)
+
+        r2 = client.get(f"/api/jobs/{job_id}")
+        data = r2.get_json()
+        assert data["state"] == "success"
+        assert data["result"]["message"] == "Nothing to do"
 
 
 # ---------------------------------------------------------------------------

@@ -206,12 +206,12 @@
           ${ep.retry_count > 0 ? ` &middot; retries: ${ep.retry_count}` : ""}
         </div>
         <div class="detail-actions">
-          <button class="btn btn-sm" onclick="actions.download()">Download</button>
-          <button class="btn btn-sm" onclick="actions.transcribe()">Transcribe</button>
-          <button class="btn btn-sm" onclick="actions.chunk()">Chunk</button>
-          <button class="btn btn-sm btn-primary" onclick="actions.generate()">Generate</button>
-          <button class="btn btn-sm" onclick="actions.run()">Run All</button>
-          <button class="btn btn-sm btn-danger" onclick="actions.retry()">Retry</button>
+          <button class="btn btn-sm" onclick="actions.download()" title="Download episode audio via yt-dlp">Download</button>
+          <button class="btn btn-sm" onclick="actions.transcribe()" title="Transcribe audio via Whisper API">Transcribe</button>
+          <button class="btn btn-sm" onclick="actions.chunk()" title="Split transcript into searchable chunks">Chunk</button>
+          <button class="btn btn-sm btn-primary" onclick="actions.generate()" title="Generate Turkish content via Claude API">Generate</button>
+          <button class="btn btn-sm" onclick="actions.run()" title="Run full pipeline from the earliest incomplete stage">Run All</button>
+          <button class="btn btn-sm btn-danger" onclick="actions.retry()" title="Resume from the last failed stage">Retry</button>
           <label><input type="checkbox" id="chk-force"> force</label>
           <label><input type="checkbox" id="chk-dryrun"> dry-run</label>
         </div>

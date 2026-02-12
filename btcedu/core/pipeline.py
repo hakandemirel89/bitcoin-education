@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from typing import Callable
+
 from sqlalchemy.orm import Session
 
 from btcedu.config import Settings
@@ -39,6 +41,14 @@ def _utcnow() -> datetime:
 
 
 @dataclass
+class StagePlan:
+    """One stage decision in a pipeline plan (produced before execution)."""
+    stage: str
+    decision: str  # "run", "skip", "pending"
+    reason: str
+
+
+@dataclass
 class StageResult:
     stage: str
     status: str  # "success", "skipped", "failed"
@@ -57,6 +67,42 @@ class PipelineReport:
     total_cost_usd: float = 0.0
     success: bool = False
     error: str | None = None
+
+
+def resolve_pipeline_plan(
+    session: Session,
+    episode: Episode,
+    force: bool = False,
+) -> list[StagePlan]:
+    """Determine what each stage would do without executing anything.
+
+    Returns a list of StagePlan entries — one per stage — showing whether
+    each stage would run, be skipped, or is pending (will run if prior
+    stages succeed).
+    """
+    session.refresh(episode)
+    current_order = _STATUS_ORDER.get(episode.status, -1)
+    plan: list[StagePlan] = []
+    will_advance = False
+
+    for stage_name, required_status in _STAGES:
+        required_order = _STATUS_ORDER[required_status]
+
+        if current_order > required_order and not force:
+            plan.append(StagePlan(stage_name, "skip", "already completed"))
+        elif current_order == required_order or force:
+            plan.append(StagePlan(
+                stage_name, "run",
+                f"forced" if force and current_order > required_order
+                else f"status={episode.status.value}",
+            ))
+            will_advance = True
+        elif will_advance:
+            plan.append(StagePlan(stage_name, "pending", "after prior stages"))
+        else:
+            plan.append(StagePlan(stage_name, "skip", "not ready"))
+
+    return plan
 
 
 def _run_stage(
@@ -114,6 +160,7 @@ def run_episode_pipeline(
     episode: Episode,
     settings: Settings,
     force: bool = False,
+    stage_callback: Callable[[str], None] | None = None,
 ) -> PipelineReport:
     """Run the full pipeline for a single episode.
 
@@ -121,12 +168,24 @@ def run_episode_pipeline(
     Each stage is skipped if the episode has already passed it.
     On failure: records error, increments retry_count, stops processing.
 
+    Args:
+        stage_callback: Optional callback invoked with the stage name
+            before each stage executes. Useful for updating progress in UIs.
+
     Returns:
         PipelineReport with per-stage results.
     """
     report = PipelineReport(
         episode_id=episode.episode_id,
         title=episode.title,
+    )
+
+    # Log pipeline plan before execution
+    plan = resolve_pipeline_plan(session, episode, force)
+    plan_lines = [f"  {p.stage}: {p.decision} ({p.reason})" for p in plan]
+    logger.info(
+        "Pipeline plan for %s (status: %s):\n%s",
+        episode.episode_id, episode.status.value, "\n".join(plan_lines),
     )
 
     logger.info("Pipeline start: %s (%s)", episode.episode_id, episode.title)
@@ -153,6 +212,8 @@ def run_episode_pipeline(
             continue
 
         logger.info("  Stage: %s", stage_name)
+        if stage_callback:
+            stage_callback(stage_name)
         result = _run_stage(session, episode, settings, stage_name, force=force)
         report.stages.append(result)
 
@@ -300,11 +361,16 @@ def retry_episode(
     session: Session,
     episode_id: str,
     settings: Settings,
+    stage_callback: Callable[[str], None] | None = None,
 ) -> PipelineReport:
     """Retry a failed episode from its last successful stage.
 
     Finds the episode, validates it has a failure state, clears the error,
     and re-runs the pipeline from the current status.
+
+    Args:
+        stage_callback: Optional callback invoked with the stage name
+            before each stage executes. Useful for updating progress in UIs.
 
     Returns:
         PipelineReport for the retry.
@@ -336,7 +402,8 @@ def retry_episode(
     episode.error_message = None
     session.commit()
 
-    return run_episode_pipeline(session, episode, settings)
+    return run_episode_pipeline(session, episode, settings,
+                                stage_callback=stage_callback)
 
 
 def write_report(report: PipelineReport, reports_dir: str) -> str:

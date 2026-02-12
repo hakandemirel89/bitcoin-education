@@ -212,3 +212,38 @@ gunicorn (-w 1 --threads 4 gthread)
 **Test results:** 183 tests passing (177 existing + 6 new/updated)
 
 ---
+
+## Pipeline Semantics: Standardize Run All / Retry Behavior
+_2026-02-12_
+
+**Problem:** "Run All" and "Retry" actions had unclear semantics. Web UI `_do_full_pipeline()` reimplemented pipeline logic inline (diverged from CLI). No pipeline plan logging, no tooltips, no documentation. "Run All" didn't clear stale errors.
+
+**Changes:**
+
+1. **`resolve_pipeline_plan()`** — New function in `pipeline.py` that returns a plan (list of stage decisions: run/skip/pending with reasons) without executing anything. Used by both "Run All" and "Retry" to show decisions upfront.
+
+2. **`stage_callback`** — New optional parameter on `run_episode_pipeline()` and `retry_episode()`. Called before each stage runs, enabling real-time progress updates in the web UI (spinner shows current stage).
+
+3. **Unified "Run All"** — `_do_full_pipeline()` now calls `run_episode_pipeline()` + `write_report()` (same as CLI), instead of reimplementing pipeline logic inline. Clears stale `error_message` before running. Returns "Nothing to do" for already-completed episodes.
+
+4. **Enhanced "Retry"** — Now logs the pipeline plan and last error before retrying. Uses `stage_callback` for real-time progress.
+
+5. **UI tooltips** — All 6 action buttons now have `title` attributes explaining what they do.
+
+6. **README documentation** — Added "Pipeline Actions Explained" section documenting detect, download, transcribe, chunk, generate, run-all, and retry with clear semantics.
+
+**Semantic definitions:**
+- **Run All**: Runs from earliest incomplete stage. Skips completed stages. Idempotent. Force re-runs all.
+- **Retry**: Requires error_message. Clears error, re-runs from current status (last successful stage).
+
+**Files modified:**
+- `btcedu/core/pipeline.py` — Added `StagePlan`, `resolve_pipeline_plan()`, `stage_callback` param
+- `btcedu/web/jobs.py` — Unified `_do_full_pipeline()` and enhanced `_do_retry()`
+- `btcedu/web/static/app.js` — Added tooltips to action buttons
+- `tests/test_pipeline.py` — Added `TestResolvePipelinePlan` (7 tests)
+- `tests/test_web.py` — Added `test_run_all_nothing_to_do_on_generated`, fixed StaticPool for threading
+- `README.md` — Added "Pipeline Actions Explained" section
+
+**Test results:** 191 tests passing (183 existing + 8 new)
+
+---

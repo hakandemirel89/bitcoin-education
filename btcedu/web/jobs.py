@@ -211,6 +211,61 @@ class JobManager:
         )
 
     def _do_full_pipeline(self, job, session, settings):
+        from btcedu.core.pipeline import (
+            resolve_pipeline_plan, run_episode_pipeline, write_report,
+        )
+        from btcedu.models.episode import Episode
+
+        episode = session.query(Episode).filter(
+            Episode.episode_id == job.episode_id,
+        ).first()
+        if not episode:
+            raise ValueError(f"Episode not found: {job.episode_id}")
+
+        # Clear stale error (same as retry behavior)
+        if episode.error_message:
+            self._log(job, f"Clearing previous error: {episode.error_message}")
+            episode.error_message = None
+            session.commit()
+
+        # Log the pipeline plan
+        plan = resolve_pipeline_plan(session, episode, force=job.force)
+        for p in plan:
+            self._log(job, f"Plan: {p.stage} \u2192 {p.decision} ({p.reason})")
+
+        run_stages = [p for p in plan if p.decision in ("run", "pending")]
+        if not run_stages:
+            self._log(job, "Nothing to do \u2014 all stages already completed")
+            self._update(job, result={"success": True, "message": "Nothing to do"})
+            return
+
+        def on_stage(stage_name):
+            self._update(job, stage=stage_name)
+            self._log(job, f"Running: {stage_name}")
+
+        # Execute via the same function CLI uses
+        self._update(job, stage=run_stages[0].stage)
+        report = run_episode_pipeline(
+            session, episode, settings,
+            force=job.force, stage_callback=on_stage,
+        )
+        write_report(report, settings.reports_dir)
+
+        if report.success:
+            self._update(job, result={
+                "success": True,
+                "cost_usd": report.total_cost_usd,
+                "stages_run": [sr.stage for sr in report.stages if sr.status == "success"],
+                "stages_skipped": [sr.stage for sr in report.stages if sr.status == "skipped"],
+            })
+            self._log(job, f"Pipeline complete: ${report.total_cost_usd:.4f}")
+        else:
+            raise RuntimeError(report.error or "Pipeline failed")
+
+    def _do_retry(self, job, session, settings):
+        from btcedu.core.pipeline import (
+            resolve_pipeline_plan, retry_episode, write_report,
+        )
         from btcedu.models.episode import Episode, EpisodeStatus
 
         episode = session.query(Episode).filter(
@@ -219,46 +274,35 @@ class JobManager:
         if not episode:
             raise ValueError(f"Episode not found: {job.episode_id}")
 
-        status_order = {
-            EpisodeStatus.NEW: 0,
-            EpisodeStatus.DOWNLOADED: 1,
-            EpisodeStatus.TRANSCRIBED: 2,
-            EpisodeStatus.CHUNKED: 3,
-            EpisodeStatus.GENERATED: 4,
-            EpisodeStatus.COMPLETED: 5,
-        }
+        if not episode.error_message and episode.status != EpisodeStatus.FAILED:
+            raise ValueError(
+                f"Nothing to retry (status={episode.status.value}, no error)"
+            )
 
-        stages = [
-            ("download", 0, self._do_download),
-            ("transcribe", 1, self._do_transcribe),
-            ("chunk", 2, self._do_chunk),
-            ("generate", 3, self._do_generate),
-        ]
+        self._update(job, stage="planning")
+        self._log(job, f"Retrying from status: {episode.status.value}")
+        self._log(job, f"Last error: {episode.error_message}")
 
-        for stage_name, min_order, runner in stages:
-            session.refresh(episode)
-            current_order = status_order.get(episode.status, -1)
+        # Show what will happen after error is cleared
+        plan = resolve_pipeline_plan(session, episode, force=False)
+        for p in plan:
+            self._log(job, f"Plan: {p.stage} \u2192 {p.decision} ({p.reason})")
 
-            if current_order > min_order and not job.force:
-                self._log(job, f"Skipping {stage_name} (already past)")
-                continue
-            if current_order < min_order and not job.force:
-                self._log(job, f"Cannot run {stage_name} yet (status: {episode.status.value})")
-                break
-
-            self._log(job, f"Stage: {stage_name}")
-            runner(job, session, settings)
-
-    def _do_retry(self, job, session, settings):
-        from btcedu.core.pipeline import retry_episode, write_report
+        def on_stage(stage_name):
+            self._update(job, stage=stage_name)
+            self._log(job, f"Running: {stage_name}")
 
         self._update(job, stage="retrying")
-        self._log(job, "Retrying from last successful stage...")
-        report = retry_episode(session, job.episode_id, settings)
+        report = retry_episode(
+            session, job.episode_id, settings, stage_callback=on_stage,
+        )
         write_report(report, settings.reports_dir)
+
         if report.success:
             self._update(job, result={
-                "success": True, "cost_usd": report.total_cost_usd,
+                "success": True,
+                "cost_usd": report.total_cost_usd,
+                "stages_run": [sr.stage for sr in report.stages if sr.status == "success"],
             })
             self._log(job, f"Retry succeeded: ${report.total_cost_usd:.4f}")
         else:

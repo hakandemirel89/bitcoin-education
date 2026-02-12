@@ -74,6 +74,50 @@ btcedu run-latest
 
 All automation commands exit with code 0 on success, 1 on any failure.
 
+## Pipeline Actions Explained
+
+### detect
+
+Fetches the RSS feed and inserts new episodes into the database with status `new`. Does not download or process anything. Fast (network I/O only).
+
+### download / transcribe / chunk / generate
+
+Individual pipeline stages. Each runs only its specific step:
+
+| Stage | What it does | Status after |
+|-------|-------------|--------------|
+| **download** | Downloads audio via yt-dlp | `downloaded` |
+| **transcribe** | Sends audio to Whisper API | `transcribed` |
+| **chunk** | Splits transcript into overlapping searchable chunks (FTS5) | `chunked` |
+| **generate** | Calls Claude to produce 6 Turkish content artifacts | `generated` |
+
+Use `--force` (CLI) or the force checkbox (UI) to re-run a stage even if its output already exists.
+
+### run (Run All)
+
+Runs the full pipeline from the **earliest incomplete stage**:
+1. Examines the episode's current status
+2. Logs a pipeline plan showing what will run and what will skip
+3. Skips stages that are already completed
+4. Runs remaining stages in order
+5. Stops on first failure, records error
+
+**Idempotent**: running on a `generated` episode does nothing.
+**Force mode**: re-runs all stages regardless of current status.
+
+Example: episode at `downloaded` → skips download, runs transcribe → chunk → generate.
+
+### retry
+
+Resumes from the **last failed stage**:
+1. Requires the episode to have an error (from a previous failure)
+2. Clears the error
+3. Re-runs the pipeline from the current status (last successful stage)
+
+Example: episode at `chunked` with "generate failed" error → clears error, skips download/transcribe/chunk, runs generate.
+
+If the episode has no error, retry returns "Nothing to retry. Use 'run' instead."
+
 ## Web Dashboard
 
 A lightweight local web GUI for monitoring episodes and triggering pipeline actions.

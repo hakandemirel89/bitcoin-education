@@ -10,7 +10,9 @@ import pytest
 from btcedu.config import Settings
 from btcedu.core.pipeline import (
     PipelineReport,
+    StagePlan,
     StageResult,
+    resolve_pipeline_plan,
     retry_episode,
     run_episode_pipeline,
     run_latest,
@@ -412,3 +414,108 @@ class TestWriteReport:
 
         assert Path(path).exists()
         assert "ep003" in path
+
+
+# ── ResolvePipelinePlan ─────────────────────────────────────────
+
+
+class TestResolvePipelinePlan:
+    def test_new_episode_plans_all_stages(self, db_session, new_episode):
+        plan = resolve_pipeline_plan(db_session, new_episode)
+        assert len(plan) == 4
+        assert plan[0] == StagePlan("download", "run", "status=new")
+        assert plan[1] == StagePlan("transcribe", "pending", "after prior stages")
+        assert plan[2] == StagePlan("chunk", "pending", "after prior stages")
+        assert plan[3] == StagePlan("generate", "pending", "after prior stages")
+
+    def test_downloaded_skips_download(self, db_session):
+        ep = Episode(
+            episode_id="ep_dl", source="youtube_rss", title="Downloaded",
+            url="https://youtube.com/watch?v=dl",
+            status=EpisodeStatus.DOWNLOADED,
+            published_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(ep)
+        db_session.commit()
+
+        plan = resolve_pipeline_plan(db_session, ep)
+        assert plan[0] == StagePlan("download", "skip", "already completed")
+        assert plan[1].decision == "run"
+        assert plan[2].decision == "pending"
+        assert plan[3].decision == "pending"
+
+    def test_chunked_skips_three(self, db_session):
+        ep = Episode(
+            episode_id="ep_ch", source="youtube_rss", title="Chunked",
+            url="https://youtube.com/watch?v=ch",
+            status=EpisodeStatus.CHUNKED,
+            published_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(ep)
+        db_session.commit()
+
+        plan = resolve_pipeline_plan(db_session, ep)
+        skipped = [p for p in plan if p.decision == "skip"]
+        assert len(skipped) == 3
+        assert plan[3] == StagePlan("generate", "run", "status=chunked")
+
+    def test_generated_skips_all(self, db_session):
+        ep = Episode(
+            episode_id="ep_gen", source="youtube_rss", title="Generated",
+            url="https://youtube.com/watch?v=gen",
+            status=EpisodeStatus.GENERATED,
+            published_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(ep)
+        db_session.commit()
+
+        plan = resolve_pipeline_plan(db_session, ep)
+        assert all(p.decision == "skip" for p in plan)
+
+    def test_force_overrides_skips(self, db_session):
+        ep = Episode(
+            episode_id="ep_force", source="youtube_rss", title="Force",
+            url="https://youtube.com/watch?v=force",
+            status=EpisodeStatus.GENERATED,
+            published_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(ep)
+        db_session.commit()
+
+        plan = resolve_pipeline_plan(db_session, ep, force=True)
+        assert all(p.decision == "run" for p in plan)
+        # First three should say "forced" since they're past their required status
+        assert plan[0].reason == "forced"
+        assert plan[3].reason == "forced"
+
+    def test_plan_with_error_still_resolves(self, db_session, failed_episode):
+        """Pipeline plan ignores error_message — only looks at status."""
+        plan = resolve_pipeline_plan(db_session, failed_episode)
+        # failed_episode is CHUNKED, so download/transcribe/chunk skip, generate runs
+        skipped = [p for p in plan if p.decision == "skip"]
+        assert len(skipped) == 3
+        assert plan[3].decision == "run"
+        assert plan[3].stage == "generate"
+
+    @patch("btcedu.core.pipeline._run_stage")
+    def test_stage_callback_invoked(self, mock_stage, db_session, tmp_path):
+        """stage_callback is called before each stage that runs."""
+        ep = Episode(
+            episode_id="ep_cb", source="youtube_rss", title="Callback",
+            url="https://youtube.com/watch?v=cb",
+            status=EpisodeStatus.CHUNKED,
+            published_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(ep)
+        db_session.commit()
+
+        mock_stage.return_value = StageResult(
+            "generate", "success", 0.5, detail="6 artifacts ($0.0375)",
+        )
+        settings = _make_settings(tmp_path)
+        called_stages = []
+        run_episode_pipeline(
+            db_session, ep, settings,
+            stage_callback=lambda s: called_stages.append(s),
+        )
+        assert called_stages == ["generate"]
